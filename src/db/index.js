@@ -23,6 +23,12 @@ export class KnowledgeDB extends Dexie {
       reviews: 'id, docId, status, submittedBy, submittedAt, decidedBy, decidedAt',
       comments: 'id, docId, authorId, createdAt, reviewId'
     })
+    // v3：知识缺口工单
+    // - gapTickets：未解决问答 → 补写需求（成员提交 → 编辑者认领 → 关联文档送审 →
+    //   审批通过回填答案来源 / 驳回退回处理），timeline 字段随记录读写处理留痕
+    this.version(3).stores({
+      gapTickets: 'id, status, createdBy, claimedBy, docId, reviewId, createdAt'
+    })
   }
 }
 

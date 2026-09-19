@@ -30,6 +30,9 @@ const seedTags = [
   { id: 't-onboarding', name: '入职', color: '#28a7e8' }
 ]
 
+// doc-3 正文提取为常量：缺口工单演示数据（rev-4 评审快照）需引用同一内容
+const doc3Body = '<h2>统一鉴权链路</h2><p>所有请求进入网关后，先校验 <b>Token</b> 再校验 <i>权限点</i>。</p><h3>角色与权限点</h3><ul><li>admin：全部权限</li><li>editor：可新增与编辑</li><li>viewer：只读</li></ul><blockquote>文档级可见性：public / team / private。</blockquote>'
+
 const seedDocs = [
   {
     id: 'doc-1', title: '前端工程初始化与目录规范',
@@ -50,7 +53,7 @@ const seedDocs = [
     categoryId: 'c-dev', tagIds: ['t-api', 't-security'],
     visibility: 'team', ownerId: 'u-admin', editors: ['u-admin', 'u-chen'],
     createdAt: ago(10 * d), updatedAt: ago(3 * d),
-    body: '<h2>统一鉴权链路</h2><p>所有请求进入网关后，先校验 <b>Token</b> 再校验 <i>权限点</i>。</p><h3>角色与权限点</h3><ul><li>admin：全部权限</li><li>editor：可新增与编辑</li><li>viewer：只读</li></ul><blockquote>文档级可见性：public / team / private。</blockquote>'
+    body: doc3Body
   },
   {
     id: 'doc-4', title: '产品需求评审 Checklist',
@@ -167,6 +170,64 @@ function doc8RejectedBody() {
   return '<h2>密码与会话策略</h2><ul><li>强制启用两步验证</li><li>密码每 30 天强制更换一次</li><li>会话 7 天过期，支持强制下线</li><li>敏感操作需二次确认</li></ul>'
 }
 
+// ---- 缺口工单演示数据（v2 增量种子）----
+// gap-3 已解决：关联 doc-3 与已通过的 rev-4，演示「审批发布后自动回填答案来源」的完整链路
+const seedReview4 = {
+  id: 'rev-4', docId: 'doc-3', status: 'approved',
+  submittedBy: 'u-chen', submittedAt: ago(2 * d),
+  snapshot: {
+    title: 'API 鉴权与权限模型',
+    body: doc3Body,
+    categoryId: 'c-dev', tagIds: ['t-api', 't-security'], visibility: 'team'
+  },
+  baseVersion: 1,
+  decidedBy: 'u-admin', decidedAt: ago(1 * d), decisionNote: '内容已覆盖权限申请流程，通过。',
+  timeline: [
+    { action: 'submit', by: 'u-chen', at: ago(2 * d), note: '补写缺口工单：新成员如何申请知识库的管理员权限？' },
+    { action: 'approve', by: 'u-admin', at: ago(1 * d), note: '内容已覆盖权限申请流程，通过。' }
+  ]
+}
+
+const seedGapTickets = [
+  {
+    id: 'gap-1',
+    question: '离线环境下如何同步知识库内容？',
+    detail: '出差途中经常没网，希望能离线编辑、联网后自动同步，目前文档里没有说明。',
+    status: 'open',
+    createdBy: 'u-mochen', createdAt: ago(3 * h),
+    claimedBy: null, claimedAt: null, docId: null, reviewId: null, resolvedAt: null,
+    timeline: [{ action: 'create', by: 'u-mochen', at: ago(3 * h), note: '' }]
+  },
+  {
+    id: 'gap-2',
+    question: '知识库支持导出为哪些格式？',
+    detail: '',
+    status: 'claimed',
+    createdBy: 'u-xiaoye', createdAt: ago(26 * h),
+    claimedBy: 'u-ziwei', claimedAt: ago(20 * h),
+    docId: null, reviewId: null, resolvedAt: null,
+    timeline: [
+      { action: 'create', by: 'u-xiaoye', at: ago(26 * h), note: '' },
+      { action: 'claim', by: 'u-ziwei', at: ago(20 * h), note: '' }
+    ]
+  },
+  {
+    id: 'gap-3',
+    question: '新成员如何申请知识库的管理员权限？',
+    detail: '入职指引里只讲了账号开通，没有说明权限申请入口。',
+    status: 'resolved',
+    createdBy: 'u-xiaoye', createdAt: ago(3 * d),
+    claimedBy: 'u-chen', claimedAt: ago(2 * d + 2 * h),
+    docId: 'doc-3', reviewId: 'rev-4', resolvedAt: ago(1 * d),
+    timeline: [
+      { action: 'create', by: 'u-xiaoye', at: ago(3 * d), note: '' },
+      { action: 'claim', by: 'u-chen', at: ago(2 * d + 2 * h), note: '' },
+      { action: 'submit', by: 'u-chen', at: ago(2 * d), note: '关联文档《API 鉴权与权限模型》送审' },
+      { action: 'resolve', by: 'u-admin', at: ago(1 * d), note: '审批通过，答案来源已回填' }
+    ]
+  }
+]
+
 const seedFavorites = [
   { id: 'fav-1', userId: 'u-admin', docId: 'doc-1' },
   { id: 'fav-2', userId: 'u-admin', docId: 'doc-8' }
@@ -223,23 +284,52 @@ function withReviewFields(doc) {
   }
 }
 
+// 种子版本：v1 基础数据；v2 缺口工单演示数据（含 rev-4 评审留痕与 doc-3 审批回写）
+const SEED_VER = '2'
+
 async function isSeeded() {
-  return (await getMeta('seeded')) === '1'
+  return (await getMeta('seeded')) === SEED_VER
+}
+
+// v2 增量种子：缺口工单 + 关联的评审留痕。老库升级时补充，全新安装在基础种子后顺带执行
+async function ensureGapSeed() {
+  if ((await db.gapTickets.count()) > 0) return
+  if (!(await db.reviews.get('rev-4'))) await db.reviews.add(seedReview4)
+  if (!(await db.comments.get('cmt-r4-1'))) {
+    await db.comments.add({ id: 'cmt-r4-1', docId: 'doc-3', reviewId: 'rev-4', authorId: 'u-chen', mentionIds: [], content: '补写缺口工单：新成员如何申请知识库的管理员权限？', createdAt: ago(2 * d) })
+  }
+  // doc-3 回写审批结论：正文不变（送审快照即当前内容），追加「审批通过」版本留痕
+  const doc3 = await db.docs.get('doc-3')
+  if (doc3 && !doc3.lastReview) {
+    const decidedAt = ago(1 * d)
+    const versions = doc3.versions?.length
+      ? doc3.versions
+      : [{ version: 1, savedAt: doc3.createdAt, savedBy: doc3.ownerId, note: '初始版本' }]
+    await db.docs.put({
+      ...doc3,
+      updatedAt: decidedAt,
+      lastReview: { reviewId: 'rev-4', status: 'approved', by: 'u-admin', at: decidedAt, note: '内容已覆盖权限申请流程，通过。', version: versions.length + 1 },
+      versions: [...versions, { version: versions.length + 1, savedAt: decidedAt, savedBy: 'u-chen', note: '评审通过后发布：内容已覆盖权限申请流程，通过。', reviewStatus: 'approved', reviewId: 'rev-4', decidedBy: 'u-admin' }]
+    })
+  }
+  await db.gapTickets.bulkAdd(seedGapTickets)
 }
 
 export async function ensureSeeded() {
   if (await isSeeded()) return
-  await db.transaction('rw', db.users, db.categories, db.tags, db.docs, db.comments, db.shares, db.favorites, db.ratings, db.reviews, async () => {
-    if ((await db.users.count()) > 0) return
-    await db.users.bulkAdd(seedUsers)
-    await db.categories.bulkAdd(seedCategories)
-    await db.tags.bulkAdd(seedTags)
-    await db.docs.bulkAdd(seedDocs.map(withReviewFields))
-    await db.comments.bulkAdd(seedComments)
-    await db.shares.bulkAdd(seedShares)
-    await db.favorites.bulkAdd(seedFavorites)
-    await db.ratings.bulkAdd(seedRatings)
-    await db.reviews.bulkAdd(seedReviews)
+  await db.transaction('rw', db.users, db.categories, db.tags, db.docs, db.comments, db.shares, db.favorites, db.ratings, db.reviews, db.gapTickets, async () => {
+    if ((await db.users.count()) === 0) {
+      await db.users.bulkAdd(seedUsers)
+      await db.categories.bulkAdd(seedCategories)
+      await db.tags.bulkAdd(seedTags)
+      await db.docs.bulkAdd(seedDocs.map(withReviewFields))
+      await db.comments.bulkAdd(seedComments)
+      await db.shares.bulkAdd(seedShares)
+      await db.favorites.bulkAdd(seedFavorites)
+      await db.ratings.bulkAdd(seedRatings)
+      await db.reviews.bulkAdd(seedReviews)
+    }
+    await ensureGapSeed()
   })
-  await setMeta('seeded', '1')
+  await setMeta('seeded', SEED_VER)
 }

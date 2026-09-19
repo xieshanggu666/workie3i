@@ -3,7 +3,10 @@ import { ref, computed } from 'vue'
 import { db } from '@/db'
 import { uid } from '@/utils/format'
 import { ensureVersions, mergeDocFields } from '@/utils/version'
+import { buildTimelineEntry } from '@/utils/review'
+import { GAP } from '@/utils/gap'
 import { useAuthStore } from './auth'
+import { useGapStore } from './gap'
 
 export const useKbStore = defineStore('kb', () => {
   const docs = ref([])
@@ -132,8 +135,21 @@ export const useKbStore = defineStore('kb', () => {
     await db.shares.where('docId').equals(id).delete()
     // 评审单随文档一并清理（直接按索引删除，避免与 review store 循环依赖）
     await db.reviews.where('docId').equals(id).delete()
+    // 关联该文档的缺口工单退回处理中：答案来源/送审关联随文档删除失效，需重新关联
+    const now = new Date().toISOString()
+    const linkedTickets = await db.gapTickets.where('docId').equals(id).toArray()
+    for (const t of linkedTickets) {
+      await db.gapTickets.update(t.id, {
+        status: GAP.CLAIMED,
+        docId: null,
+        reviewId: null,
+        resolvedAt: null,
+        timeline: [...(t.timeline || []), buildTimelineEntry('reset', 'system', '关联文档已删除，工单退回处理', now)]
+      })
+    }
     comments.value = comments.value.filter((c) => c.docId !== id)
-    await reloadDocs()
+    const gap = useGapStore()
+    await Promise.all([reloadDocs(), gap.reload()])
   }
 
   async function addCategory(name, icon) {

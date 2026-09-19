@@ -133,7 +133,12 @@ async function submit(force = false) {
     } else {
       const d = await kb.createDoc(payload, auth.user)
       localStorage.removeItem(draftKey)
-      router.push('/docs/' + d.id)
+      // 从缺口工单「新建文档补写」进入：发布文档后回到工单中心继续关联送审
+      if (route.query.gap) {
+        router.push({ path: '/gaps', query: { pick: route.query.gap, doc: d.id } })
+      } else {
+        router.push('/docs/' + d.id)
+      }
     }
   } finally {
     saving.value = false
@@ -183,8 +188,10 @@ async function load() {
       tagIds.value = p.tagIds || []
       visibility.value = p.visibility || 'public'
       body.value = p.body || ''
-    } else if (kb.categories[0]) {
-      categoryId.value = kb.categories[0].id
+    } else {
+      // 缺口工单「新建文档补写」：以工单问题作为初始标题
+      if (route.query.title) title.value = String(route.query.title).slice(0, 80)
+      if (kb.categories[0]) categoryId.value = kb.categories[0].id
     }
   }
 }

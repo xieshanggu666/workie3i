@@ -4,12 +4,16 @@ import { db } from '@/db'
 import { uid } from '@/utils/format'
 import { ensureVersions } from '@/utils/version'
 import { REVIEW, PUBLISH, buildTimelineEntry } from '@/utils/review'
+import { GAP } from '@/utils/gap'
 import { useKbStore } from './kb'
+import { useGapStore } from './gap'
 
 // 知识文档评审流程 store：
 // 发起（快照待审内容、文档置为评审中并锁定）→ 成员发表评审意见 →
 // 管理员通过（回写正文/可见性、追加带审批标记的版本）或驳回（解除锁定，内容不变）→
-// 全程在评审单 timeline 与评审意见中留痕
+// 全程在评审单 timeline 与评审意见中留痕。
+// 评审单若由缺口工单发起（gapTickets.reviewId 关联），审批结果在同一事务内联动工单：
+// 通过 → 工单置为已解决并回填答案来源；驳回/撤回 → 工单退回处理中。
 export const useReviewStore = defineStore('review', () => {
   const reviews = ref([])
   const loaded = ref(false)
@@ -139,6 +143,30 @@ export const useReviewStore = defineStore('review', () => {
     return created
   }
 
+  // 联动缺口工单：审批通过 → 已解决并回填答案来源；驳回/撤回 → 退回处理中。
+  // 须在评审决策的同一事务内调用（tables 需包含 db.gapTickets），保证两边状态一致
+  async function syncGapTicket(reviewId, action, note, userId, now) {
+    const ticket = await db.gapTickets.where('reviewId').equals(reviewId).first()
+    if (!ticket) return
+    if (action === 'resolve') {
+      await db.gapTickets.update(ticket.id, {
+        status: GAP.RESOLVED,
+        resolvedAt: now,
+        timeline: [...(ticket.timeline || []), buildTimelineEntry('resolve', userId, '审批通过，答案来源已回填', now)]
+      })
+    } else {
+      // 退回处理：保留关联文档便于修改后重新送审，仅解除评审单关联
+      const reason = action === 'return'
+        ? '评审驳回' + (note ? '：' + note : '') + '，退回处理'
+        : '评审已撤回，退回处理'
+      await db.gapTickets.update(ticket.id, {
+        status: GAP.CLAIMED,
+        reviewId: null,
+        timeline: [...(ticket.timeline || []), buildTimelineEntry('return', userId, reason, now)]
+      })
+    }
+  }
+
   // 管理员审批：approve 通过 / reject 驳回。
   // 通过：把待审批快照回写到文档（含可见性），追加「审批通过」版本，解除评审中状态；
   // 驳回：文档内容与可见性保持发起前不变，仅解除锁定并留痕。
@@ -149,7 +177,7 @@ export const useReviewStore = defineStore('review', () => {
     const userId = currentUser?.id || 'u-guest'
     let result = { status: 'error' }
 
-    await db.transaction('rw', db.docs, db.reviews, async () => {
+    await db.transaction('rw', db.docs, db.reviews, db.gapTickets, async () => {
       const review = await db.reviews.get(reviewId)
       if (!review) { result = { status: 'missing' }; return }
       if (review.status !== REVIEW.PENDING) { result = { status: 'closed', review }; return }
@@ -204,10 +232,13 @@ export const useReviewStore = defineStore('review', () => {
       }
 
       await db.reviews.put(decided)
+      // 缺口工单联动：通过回填答案来源 / 驳回退回处理（同事务，状态不会脱节）
+      await syncGapTicket(reviewId, status === REVIEW.APPROVED ? 'resolve' : 'return', note, userId, now)
       result = { status: 'ok', review: decided, approved: status === REVIEW.APPROVED }
     })
 
-    await Promise.all([reload(), kb.reloadDocs()])
+    const gap = useGapStore()
+    await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
     return result
   }
 
@@ -219,7 +250,7 @@ export const useReviewStore = defineStore('review', () => {
     const userId = currentUser?.id
     let result = { status: 'error' }
 
-    await db.transaction('rw', db.docs, db.reviews, async () => {
+    await db.transaction('rw', db.docs, db.reviews, db.gapTickets, async () => {
       const review = await db.reviews.get(reviewId)
       if (!review) { result = { status: 'missing' }; return }
       if (review.status !== REVIEW.PENDING || review.submittedBy !== userId) { result = { status: 'denied' }; return }
@@ -230,10 +261,13 @@ export const useReviewStore = defineStore('review', () => {
       }
       await db.reviews.put(withdrawn)
       await db.docs.update(review.docId, { publishState: PUBLISH.PUBLISHED, activeReviewId: null })
+      // 缺口工单联动：撤回送审，工单退回处理中
+      await syncGapTicket(reviewId, 'withdraw', '', userId, now)
       result = { status: 'ok', review: withdrawn }
     })
 
-    await Promise.all([reload(), kb.reloadDocs()])
+    const gap = useGapStore()
+    await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
     return result
   }
 

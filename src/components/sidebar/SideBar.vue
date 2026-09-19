@@ -5,6 +5,7 @@ import { useKbStore } from '@/stores/kb'
 import { useAuthStore } from '@/stores/auth'
 import { useEngagementStore } from '@/stores/engagement'
 import { useReviewStore } from '@/stores/review'
+import { useGapStore } from '@/stores/gap'
 import { canEditContent, roleLabel } from '@/utils/permission'
 import { avatarColor } from '@/utils/format'
 
@@ -14,6 +15,7 @@ const kb = useKbStore()
 const auth = useAuthStore()
 const engagement = useEngagementStore()
 const reviewStore = useReviewStore()
+const gapStore = useGapStore()
 
 const docById = computed(() => Object.fromEntries(kb.docs.map((d) => [d.id, d])))
 
@@ -52,6 +54,9 @@ function goDoc(id) {
       <div class="link" :class="{ on: route.name === 'search' }" @click="go('/search', {})">🔍 全局搜索</div>
       <div class="link" :class="{ on: route.name === 'reviewCenter' }" @click="go('/reviews', {})">
         🧾 评审中心<span v-if="reviewStore.pendingCount" class="link-badge">{{ reviewStore.pendingCount }}</span>
+      </div>
+      <div class="link" :class="{ on: route.name === 'gapTickets' }" @click="go('/gaps', {})">
+        📮 缺口工单<span v-if="gapStore.openCount" class="link-badge">{{ gapStore.openCount }}</span>
       </div>
       <div class="link" :class="{ on: route.name === 'profile' }" @click="go('/profile', {})">⚙️ 账号与权限</div>
     </nav>

@@ -3,8 +3,10 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useKbStore } from '@/stores/kb'
 import { useAuthStore } from '@/stores/auth'
+import { useGapStore } from '@/stores/gap'
 import { canViewDoc } from '@/utils/permission'
 import { extractKeywords, scoreDoc } from '@/utils/qa'
+import { gapStatusLabel } from '@/utils/gap'
 import { stripHtml, highlightText, highlightTitle, extractSnippet } from '@/utils/search'
 import { formatDate } from '@/utils/format'
 
@@ -12,6 +14,7 @@ const route = useRoute()
 const router = useRouter()
 const kb = useKbStore()
 const auth = useAuthStore()
+const gapStore = useGapStore()
 
 const question = ref('')
 const asked = ref('')
@@ -21,6 +24,27 @@ const answer = ref('')
 const cites = ref([])
 const related = ref([])
 const suggestions = ['Vue 如何初始化项目?', 'Dexie 怎么进行查询?', '权限模型里有哪些角色?', '新成员入职流程是什么?']
+
+// ---- 缺口工单联动 ----
+const gapFormOpen = ref(false)
+const gapDetail = ref('')
+
+const docById = computed(() => Object.fromEntries(kb.docs.map((d) => [d.id, d])))
+// 当前问题是否已有未解决工单（创建后/已存在都会命中，避免重复提交）
+const activeTicket = computed(() => (asked.value ? gapStore.activeTicketForQuestion(asked.value) : null))
+// 已解决工单中匹配本问题的答案来源（审批发布后自动回填，此处对提问者可见）
+const resolvedSources = computed(() =>
+  asked.value ? gapStore.resolvedTicketsMatching(extractKeywords(asked.value)).slice(0, 3) : []
+)
+
+async function submitGap() {
+  const res = await gapStore.createTicket({ question: asked.value, detail: gapDetail.value }, auth.user)
+  if (res.status === 'ok' || res.status === 'duplicate') {
+    // 成功后由 activeTicket 计算属性接管展示（该问题已提交补写需求）
+    gapFormOpen.value = false
+    gapDetail.value = ''
+  }
+}
 
 async function ask(raw) {
   const qtext = (raw ?? question.value).trim()
@@ -35,6 +59,8 @@ function answering() {
   answer.value = ''
   cites.value = []
   related.value = []
+  gapFormOpen.value = false
+  gapDetail.value = ''
 
   setTimeout(() => {
     const keywords = extractKeywords(asked.value)
@@ -109,6 +135,38 @@ watch(() => route.query.q, (v) => { if (v) { question.value = v; ask(v) } }, { i
           <span class="rel-tag">{{ kb.catMap[r.categoryId]?.name }}</span>
         </div>
       </div>
+
+      <!-- 缺口工单联动：未命中时展示已回填的答案来源；未解决的问题可一键转为补写需求 -->
+      <div class="gap-block">
+        <template v-if="!cites.length && resolvedSources.length">
+          <div class="block-title">💡 以下补写文档可能回答了该问题</div>
+          <div v-for="t in resolvedSources" :key="t.id" class="gap-src" @click="docById[t.docId] && router.push('/docs/' + t.docId)">
+            <span class="gap-src-title">《{{ docById[t.docId]?.title || '文档已删除' }}》</span>
+            <span class="gap-src-q">来自缺口工单：{{ t.question }}</span>
+          </div>
+        </template>
+
+        <div v-if="activeTicket" class="gap-exists">
+          📋 该问题已提交补写需求（{{ gapStatusLabel(activeTicket.status) }}），编辑者处理后会在此回填答案来源。
+          <a @click="router.push('/gaps')">前往缺口工单 →</a>
+        </div>
+
+        <template v-else-if="auth.user">
+          <div v-if="!gapFormOpen" class="gap-cta">
+            <button class="btn sm" @click="gapFormOpen = true">
+              📝 {{ cites.length ? '答案没解决你的问题？提交补写需求' : '没解决？提交补写需求' }}
+            </button>
+          </div>
+          <div v-else class="gap-form">
+            <textarea v-model="gapDetail" rows="2" placeholder="补充说明（可选）：描述你期望的答案或使用场景…"></textarea>
+            <div class="gap-form-acts">
+              <button class="btn sm primary" @click="submitGap">提交补写需求</button>
+              <button class="btn sm ghost" @click="gapFormOpen = false">取消</button>
+            </div>
+            <div class="gap-form-hint">提交后生成缺口工单，编辑者认领补写并送审，审批通过后答案来源会自动回填。</div>
+            </div>
+        </template>
+      </div>
     </div>
 
     <div v-else-if="!thinking" class="empty card"><div class="ico">💬</div>输入问题开始提问</div>
@@ -145,4 +203,16 @@ watch(() => route.query.q, (v) => { if (v) { question.value = v; ask(v) } }, { i
 .rel:hover { background: var(--primary-weak); }
 .rel-title { font-weight: 500; }
 .rel-tag { color: var(--text-3); font-size: 12px; }
+.gap-block { margin-top: 18px; border-top: 1px dashed var(--border); padding-top: 14px; }
+.gap-src { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; border-radius: 8px; cursor: pointer; background: #f0fdf4; border: 1px solid #bbf7d0; margin-bottom: 6px; }
+.gap-src:hover { border-color: #16a34a; }
+.gap-src-title { color: #15803d; font-weight: 600; }
+.gap-src-q { color: var(--text-3); font-size: 12px; }
+.gap-exists { font-size: 13px; color: var(--text-2); background: var(--primary-weak); border-radius: 8px; padding: 10px 14px; }
+.gap-exists a { cursor: pointer; }
+.gap-cta { display: flex; }
+.gap-form textarea { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px; resize: vertical; outline: none; }
+.gap-form textarea:focus { border-color: var(--primary); }
+.gap-form-acts { display: flex; gap: 8px; margin-top: 8px; }
+.gap-form-hint { margin-top: 8px; font-size: 12px; color: var(--text-3); }
 </style>
