@@ -132,6 +132,16 @@ export const useKbStore = defineStore('kb', () => {
     await db.shares.where('docId').equals(id).delete()
     // 评审单随文档一并清理（直接按索引删除，避免与 review store 循环依赖）
     await db.reviews.where('docId').equals(id).delete()
+    // 关联该文档的未解决工单退回待认领；已解决工单保留答案来源记录（详情展示为已删除文档）
+    const now = new Date().toISOString()
+    const linkedTickets = await db.gapTickets.where('docId').equals(id).toArray()
+    for (const t of linkedTickets) {
+      if (t.status === 'resolved') continue
+      await db.gapTickets.update(t.id, {
+        status: 'open', docId: null, reviewId: null, claimedBy: null, claimedAt: null,
+        timeline: [...(t.timeline || []), { action: 'doc-deleted', by: 'system', note: '关联文档已删除，工单退回待认领', at: now }]
+      })
+    }
     comments.value = comments.value.filter((c) => c.docId !== id)
     await reloadDocs()
   }

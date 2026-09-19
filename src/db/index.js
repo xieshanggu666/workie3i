@@ -23,6 +23,12 @@ export class KnowledgeDB extends Dexie {
       reviews: 'id, docId, status, submittedBy, submittedAt, decidedBy, decidedAt',
       comments: 'id, docId, authorId, createdAt, reviewId'
     })
+    // v3：知识缺口工单
+    // - gapTickets：成员把未解决的问答转为补写需求 → 编辑者认领并关联文档送审 →
+    //   审批发布后回填答案来源，驳回退回处理；状态与处理记录随工单保存，无需额外索引外的字段
+    this.version(3).stores({
+      gapTickets: 'id, status, createdBy, createdAt, claimedBy, docId, reviewId'
+    })
   }
 }
 

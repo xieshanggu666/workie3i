@@ -133,7 +133,9 @@ async function submit(force = false) {
     } else {
       const d = await kb.createDoc(payload, auth.user)
       localStorage.removeItem(draftKey)
-      router.push('/docs/' + d.id)
+      // 从缺口工单进入的新建：保存后回流工单页并预选该文档，便于直接关联送审
+      if (route.query.gap) router.push({ path: '/gaps', query: { ticket: String(route.query.gap), linkDoc: d.id } })
+      else router.push('/docs/' + d.id)
     }
   } finally {
     saving.value = false
@@ -183,8 +185,10 @@ async function load() {
       tagIds.value = p.tagIds || []
       visibility.value = p.visibility || 'public'
       body.value = p.body || ''
-    } else if (kb.categories[0]) {
-      categoryId.value = kb.categories[0].id
+    } else {
+      // 从缺口工单进入：预填待解答问题为标题
+      if (route.query.title) title.value = String(route.query.title)
+      if (kb.categories[0]) categoryId.value = kb.categories[0].id
     }
   }
 }

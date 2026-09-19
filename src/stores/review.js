@@ -5,6 +5,7 @@ import { uid } from '@/utils/format'
 import { ensureVersions } from '@/utils/version'
 import { REVIEW, PUBLISH, buildTimelineEntry } from '@/utils/review'
 import { useKbStore } from './kb'
+import { useGapTicketStore } from './gap'
 
 // 知识文档评审流程 store：
 // 发起（快照待审内容、文档置为评审中并锁定）→ 成员发表评审意见 →
@@ -208,6 +209,8 @@ export const useReviewStore = defineStore('review', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 审批结论回传缺口工单：通过则回填答案来源，驳回则退回处理（延迟调用避免循环依赖）
+    if (result.status === 'ok') await useGapTicketStore().syncFromReview(result.review)
     return result
   }
 
@@ -234,6 +237,8 @@ export const useReviewStore = defineStore('review', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 撤回送审同样回传缺口工单：工单退回处理中
+    if (result.status === 'ok') await useGapTicketStore().syncFromReview(result.review)
     return result
   }
 

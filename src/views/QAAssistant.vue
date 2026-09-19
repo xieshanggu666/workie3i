@@ -3,7 +3,9 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useKbStore } from '@/stores/kb'
 import { useAuthStore } from '@/stores/auth'
+import { useGapTicketStore } from '@/stores/gap'
 import { canViewDoc } from '@/utils/permission'
+import { canCreateGapTicket, gapStatusLabel } from '@/utils/gap'
 import { extractKeywords, scoreDoc } from '@/utils/qa'
 import { stripHtml, highlightText, highlightTitle, extractSnippet } from '@/utils/search'
 import { formatDate } from '@/utils/format'
@@ -12,6 +14,7 @@ const route = useRoute()
 const router = useRouter()
 const kb = useKbStore()
 const auth = useAuthStore()
+const gapStore = useGapTicketStore()
 
 const question = ref('')
 const asked = ref('')
@@ -20,6 +23,11 @@ const answered = ref(false)
 const answer = ref('')
 const cites = ref([])
 const related = ref([])
+// 补写需求工单：问题未解决时转为知识缺口工单
+const gapFormOpen = ref(false)
+const gapNote = ref('')
+const gapDone = ref(null)
+const gapBusy = ref(false)
 const suggestions = ['Vue 如何初始化项目?', 'Dexie 怎么进行查询?', '权限模型里有哪些角色?', '新成员入职流程是什么?']
 
 async function ask(raw) {
@@ -35,6 +43,9 @@ function answering() {
   answer.value = ''
   cites.value = []
   related.value = []
+  gapFormOpen.value = false
+  gapNote.value = ''
+  gapDone.value = null
 
   setTimeout(() => {
     const keywords = extractKeywords(asked.value)
@@ -66,6 +77,23 @@ function answering() {
 }
 
 function useSuggestion(s) { question.value = s; ask(s) }
+
+// 同一问题是否已有在途工单（避免重复提交）
+const gapExisting = computed(() => (answered.value ? gapStore.findActiveByQuestion(asked.value) : null))
+
+async function submitGapTicket() {
+  if (gapBusy.value) return
+  gapBusy.value = true
+  try {
+    const res = await gapStore.createTicket(asked.value, gapNote.value.trim(), auth.user)
+    if (res.status === 'ok') {
+      gapDone.value = res.ticket
+      gapFormOpen.value = false
+    }
+  } finally {
+    gapBusy.value = false
+  }
+}
 
 watch(() => route.query.q, (v) => { if (v) { question.value = v; ask(v) } }, { immediate: true })
 </script>
@@ -109,6 +137,30 @@ watch(() => route.query.q, (v) => { if (v) { question.value = v; ask(v) } }, { i
           <span class="rel-tag">{{ kb.catMap[r.categoryId]?.name }}</span>
         </div>
       </div>
+
+      <!-- 问题未解决：转为知识缺口工单，由编辑者认领补写 -->
+      <div class="gap-cta">
+        <template v-if="gapDone">
+          <span class="gap-ok">✅ 已提交补写需求，编辑者认领处理后会回填答案来源。</span>
+          <a @click="router.push('/gaps')">查看工单</a>
+        </template>
+        <template v-else-if="gapExisting">
+          <span class="gap-exist">📋 该问题已有在途工单（{{ gapStatusLabel(gapExisting.status) }}），处理完成后会在此回填答案来源。</span>
+          <a @click="router.push('/gaps')">查看工单</a>
+        </template>
+        <template v-else-if="canCreateGapTicket(auth.user)">
+          <span class="gap-tip">没有解决你的问题？</span>
+          <button class="btn sm" @click="gapFormOpen = !gapFormOpen">📝 转为补写需求</button>
+          <div v-if="gapFormOpen" class="gap-form">
+            <div class="gf-q">问题：{{ asked }}</div>
+            <textarea v-model="gapNote" rows="2" placeholder="补充说明（可选）：期望得到什么样的解答、使用场景等"></textarea>
+            <div class="gf-actions">
+              <button class="btn sm primary" :disabled="gapBusy" @click="submitGapTicket">提交工单</button>
+              <button class="btn sm ghost" @click="gapFormOpen = false">取消</button>
+            </div>
+          </div>
+        </template>
+      </div>
     </div>
 
     <div v-else-if="!thinking" class="empty card"><div class="ico">💬</div>输入问题开始提问</div>
@@ -145,4 +197,14 @@ watch(() => route.query.q, (v) => { if (v) { question.value = v; ask(v) } }, { i
 .rel:hover { background: var(--primary-weak); }
 .rel-title { font-weight: 500; }
 .rel-tag { color: var(--text-3); font-size: 12px; }
+.gap-cta { margin-top: 18px; border-top: 1px dashed var(--border); padding-top: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.gap-tip { color: var(--text-2); }
+.gap-ok { color: var(--accent); }
+.gap-exist { color: var(--text-2); }
+.gap-cta a { cursor: pointer; }
+.gap-form { width: 100%; margin-top: 4px; display: flex; flex-direction: column; gap: 8px; }
+.gf-q { font-size: 13px; color: var(--text-2); background: var(--panel-2); border-radius: 8px; padding: 8px 12px; }
+.gap-form textarea { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px; resize: vertical; outline: none; }
+.gap-form textarea:focus { border-color: var(--primary); }
+.gf-actions { display: flex; gap: 8px; }
 </style>

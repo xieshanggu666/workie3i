@@ -223,12 +223,65 @@ function withReviewFields(doc) {
   }
 }
 
+// ---- 知识缺口工单演示数据 ----
+// 覆盖四种状态：待认领 / 处理中 / 送审中（关联 rev-1，审批后自动回填）/ 已解决（关联已通过的 rev-2）
+const seedGapTickets = [
+  {
+    id: 'gap-1', question: '灰度发布的回滚策略应该怎么配置？', note: '监控告警里提到灰度回滚，但故障排查手册只有通用步骤，希望有一篇专门讲配置的文章。',
+    status: 'open', createdBy: 'u-xiaoye', createdAt: ago(2 * h),
+    claimedBy: null, claimedAt: null, docId: null, reviewId: null,
+    answerDocId: null, resolvedAt: null, resolvedBy: null,
+    timeline: [{ action: 'create', by: 'u-xiaoye', at: ago(2 * h), note: '监控告警里提到灰度回滚，但故障排查手册只有通用步骤，希望有一篇专门讲配置的文章。' }]
+  },
+  {
+    id: 'gap-2', question: '设计稿的间距与字号标注规范看哪篇？', note: '',
+    status: 'claimed', createdBy: 'u-mochen', createdAt: ago(1 * d),
+    claimedBy: 'u-ziwei', claimedAt: ago(3 * h), docId: null, reviewId: null,
+    answerDocId: null, resolvedAt: null, resolvedBy: null,
+    timeline: [
+      { action: 'create', by: 'u-mochen', at: ago(1 * d), note: '' },
+      { action: 'claim', by: 'u-ziwei', at: ago(3 * h), note: '' }
+    ]
+  },
+  {
+    id: 'gap-3', question: '生产环境密钥泄露后的处置流程是什么？', note: '安全基线里只说了要轮换，具体响应步骤不清楚。',
+    status: 'resolved', createdBy: 'u-xiaoye', createdAt: ago(3 * d),
+    claimedBy: 'u-chen', claimedAt: ago(60 * h), docId: 'doc-6', reviewId: 'rev-2',
+    answerDocId: 'doc-6', resolvedAt: ago(6 * h), resolvedBy: 'u-admin',
+    timeline: [
+      { action: 'create', by: 'u-xiaoye', at: ago(3 * d), note: '安全基线里只说了要轮换，具体响应步骤不清楚。' },
+      { action: 'claim', by: 'u-chen', at: ago(60 * h), note: '' },
+      { action: 'submit', by: 'u-chen', at: ago(2 * d), note: '关联文档《线上故障排查手册》并送审' },
+      { action: 'approve', by: 'u-admin', at: ago(6 * h), note: '复盘环节很有必要，通过。' }
+    ]
+  },
+  {
+    id: 'gap-4', question: '初始化前端工程时 lint 与包管理器的统一规范是什么？', note: '',
+    status: 'in_review', createdBy: 'u-mochen', createdAt: ago(8 * h),
+    claimedBy: 'u-xiaoye', claimedAt: ago(6 * h), docId: 'doc-1', reviewId: 'rev-1',
+    answerDocId: null, resolvedAt: null, resolvedBy: null,
+    timeline: [
+      { action: 'create', by: 'u-mochen', at: ago(8 * h), note: '' },
+      { action: 'claim', by: 'u-xiaoye', at: ago(6 * h), note: '' },
+      { action: 'submit', by: 'u-xiaoye', at: ago(5 * h), note: '关联文档《前端工程初始化与目录规范》并送审' }
+    ]
+  }
+]
+
+// 老库升级（v1/v2 → v3）后补种工单演示数据；已有工单则不重复写入
+async function seedGapTicketsIfEmpty() {
+  if ((await db.gapTickets.count()) === 0) await db.gapTickets.bulkAdd(seedGapTickets)
+}
+
 async function isSeeded() {
   return (await getMeta('seeded')) === '1'
 }
 
 export async function ensureSeeded() {
-  if (await isSeeded()) return
+  if (await isSeeded()) {
+    await seedGapTicketsIfEmpty()
+    return
+  }
   await db.transaction('rw', db.users, db.categories, db.tags, db.docs, db.comments, db.shares, db.favorites, db.ratings, db.reviews, async () => {
     if ((await db.users.count()) > 0) return
     await db.users.bulkAdd(seedUsers)
@@ -241,5 +294,6 @@ export async function ensureSeeded() {
     await db.ratings.bulkAdd(seedRatings)
     await db.reviews.bulkAdd(seedReviews)
   })
+  await seedGapTicketsIfEmpty()
   await setMeta('seeded', '1')
 }
